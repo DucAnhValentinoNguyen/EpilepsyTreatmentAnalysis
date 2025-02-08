@@ -1,0 +1,144 @@
+---
+title: "EpilepsyTreatmentAnalysis"
+author: "Duc-Anh Nguyen"
+date: "2025-02-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+The dataset epil contains information of treatments of 59 patients of epilepsy. 
+Goal: analysis the variable y: number of seizures (caused by epilepsy), measured in 4 periods, each are 2 weeks long.
+There are 59 patients (covariate subject) and the other covariates are:  
++ trt Behandlung(placebo or probagide)
++ lbase: log-transformed and centered of number of seizures the whole study (8 weeks)
++ lage: log-transformed and centered of age
++ V4 indicator of the fourth period 
++ period 
+
+As we are modeling count data we are thinking of poisson linear model
+```{r}
+library(MASS)
+library(tidyverse)
+data("epil")
+head(epil)
+
+skimr::skim(epil)
+table(epil$y)
+table(epil$trt)
+table(epil$lbase)
+table(epil$lage)
+table(epil$V4)
+table(epil$period)
+
+ggplot(aes(period, y, col = as.factor(subject)), data = epil) + geom_point() + geom_line() +facet_wrap(~trt)
+
+
+
+```
+
+
+```{r}
+library(lme4)
+mixed_poisson_model <- glmer(
+  formula = y ~ lbase*trt + lage + V4 +(1|subject),
+  family = poisson,
+  data = epil
+)
+summary(mixed_poisson_model)
+
+
+```
+
+
+```{r}
+# install.packages("gee")
+library(gee)
+
+# for correlation structure "independence
+model_gee_indep <-
+  gee(
+    formula = y ~ lbase * trt + lage + V4,
+    id = subject,
+    family = poisson,
+    corstr = "independence",
+    data = epil
+  )
+
+# correlation structure "exchangeable"
+model_gee_equi <- gee(
+  formula = y ~ lbase * trt + lage + V4,
+  id = subject,
+  family = poisson,
+  corstr = "exchangeable",
+  data = epil
+)
+
+
+# correlation structure "AR-1"
+model_gee_AR1 <- gee(
+  formula = y ~ lbase * trt + lage + V4,
+  id = subject,
+  family = poisson,
+  corstr = "AR-M",
+  Mv = 1,
+  data = epil
+)
+
+model_Poisson <- glm(
+  formula = y ~ lbase + trt + lage + V4 + lbase:trt,
+  family = poisson,
+  data = epil
+)
+model_quasi_Poisson <- glm(
+  formula = y ~ lbase + trt + lage + V4 + lbase:trt,
+  family = quasipoisson,
+  data = epil
+)
+
+
+
+beta_hat <- se_beta_hat <- as.data.frame(matrix(0, 6, 6))
+colnames(beta_hat) <-
+  colnames(se_beta_hat) <- names(model_Poisson$coefficients)
+rownames(beta_hat) <-
+  rownames(se_beta_hat) <- c("Poisson",
+                             "Quasi-Poisson",
+                             "GEEIndep",
+                             "GEEEqui",
+                             "GEEAR-1",
+                             "RandomIntercept")
+beta_hat[1, ] <- model_Poisson$coefficients
+beta_hat[2, ] <- model_quasi_Poisson$coefficients
+beta_hat[3, ] <- model_gee_indep$coefficients
+beta_hat[4, ] <- model_gee_equi$coefficients
+beta_hat[5, ] <- model_gee_AR1$coefficients
+beta_hat[6, ] <- mixed_poisson_model@beta
+se_beta_hat[1, ] <- sqrt(diag(summary(model_Poisson)$cov.unscaled))
+se_beta_hat[2, ] <- sqrt(diag(summary(model_quasi_Poisson)$cov.scaled))
+se_beta_hat[3, ] <- sqrt(diag(model_gee_indep$robust.variance))
+se_beta_hat[4, ] <- sqrt(diag(model_gee_equi$robust.variance))
+se_beta_hat[5, ] <- sqrt(diag(model_gee_AR1$robust.variance))
+se_beta_hat[6, ] <- sqrt(diag(summary(mixed_poisson_model)$vcov))
+beta_hat
+se_beta_hat
+
+
+summary(model_gee_indep)
+
+summary(model_gee_equi)
+
+summary(model_gee_AR1)
+```
+
+
+The estimators:
++ pretty much the same for the mixed lm of poisson, quasi poisson and marginal one
+
+
+The se:
++ the differences between the mixed lm and the marginal(except for V4) are quite significant
+ 
